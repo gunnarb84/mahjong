@@ -24,6 +24,10 @@ unity/Assets/AssetStoreTools*
 # WebGL-Build-Ausgabe (entsteht bei jedem Build neu)
 build/
 
+# Deploy-Arbeitsverzeichnis
+.deploy-tmp/
+.gh-pages/
+
 # Lokale Debug-Screenshots
 shot-*.png
 *.unityweb

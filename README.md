@@ -33,6 +33,8 @@ fortgesetzt (Gewinnen löscht ihn).
 
 ## WebGL-Build
 
+**Live: https://gunnarb84.github.io/mahjong/**
+
 1. Einmal im Editor: **Mahjong → Stein-Atlas generieren** (4096² POT-Atlas)
 2. **Mahjong → WebGL bauen** — Ausgabe in `build/WebGL/` (Gzip + Decompression-
    Fallback, läuft auf jedem Hoster), Mahjong-Template mit Ladebalken
