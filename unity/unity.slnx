@@ -1,0 +1,5 @@
+﻿<Solution>
+  <Project Path="Mahjong.Core.csproj" />
+  <Project Path="Mahjong.Game.csproj" />
+  <Project Path="Mahjong.Game.Editor.csproj" />
+</Solution>

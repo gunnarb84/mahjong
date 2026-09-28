@@ -1,0 +1,29 @@
+# .NET
+bin/
+obj/
+*.user
+TestResults/
+
+# Unity — das Unity-Projekt wird später im Unterordner unity/ liegen
+unity/[Ll]ibrary/
+unity/[Tt]emp/
+unity/[Oo]bj/
+unity/[Bb]uild/
+unity/[Bb]uilds/
+unity/[Ll]ogs/
+unity/[Uu]ser[Ss]ettings/
+unity/[Mm]emoryCaptures/
+unity/*.csproj
+unity/*.sln
+unity/*.unityproj
+unity/*.suo
+.DS_Store
+crashlytics-build.properties
+unity/Assets/AssetStoreTools*
+
+# WebGL-Build-Ausgabe (entsteht bei jedem Build neu)
+build/
+
+# Lokale Debug-Screenshots
+shot-*.png
+*.unityweb

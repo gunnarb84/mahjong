@@ -1,0 +1,10 @@
+{
+    "name": "Mahjong.Game.Editor",
+    "references": [
+        "Mahjong.Game",
+        "Mahjong.Core"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ]
+}

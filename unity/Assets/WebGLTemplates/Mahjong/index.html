@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Mahjong Solitaire</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #1a221a; overflow: hidden; }
+    #unity-container { position: absolute; inset: 0; }
+    #unity-canvas { width: 100%; height: 100%; display: block; outline: none;
+      /* Browser-Pinch-Zoom auf der Spielflaeche unterdruecken */
+      touch-action: none; }
+    #unity-loading { position: absolute; inset: 0; display: flex;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 14px; color: #e8e2ce; font-family: sans-serif; }
+    #unity-loading h1 { margin: 0; font-size: 28px; font-weight: 600;
+      letter-spacing: 1px; }
+    #unity-progress-bar { width: min(320px, 70vw); height: 10px;
+      border: 1px solid #5d6b5d; border-radius: 5px; overflow: hidden;
+      background: #0e130e; }
+    #unity-progress { width: 0%; height: 100%; background: #7da87d;
+      transition: width 0.2s linear; }
+    #unity-loading.done { display: none; }
+  </style>
+</head>
+<body>
+  <div id="unity-container">
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="unity-loading">
+      <h1>Mahjong Solitaire</h1>
+      <div id="unity-progress-bar"><div id="unity-progress"></div></div>
+    </div>
+  </div>
+  <script src="Build/{{{ LOADER_FILENAME }}}"></script>
+  <script>
+    createUnityInstance(document.querySelector("#unity-canvas"), {
+      dataUrl: "Build/{{{ DATA_FILENAME }}}",
+      frameworkUrl: "Build/{{{ FRAMEWORK_FILENAME }}}",
+      codeUrl: "Build/{{{ CODE_FILENAME }}}",
+    }, function (progress) {
+      document.getElementById("unity-progress").style.width =
+        Math.round(progress * 100) + "%";
+    }).then(function () {
+      document.getElementById("unity-loading").classList.add("done");
+    });
+  </script>
+</body>
+</html>

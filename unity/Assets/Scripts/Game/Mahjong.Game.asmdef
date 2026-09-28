@@ -1,0 +1,6 @@
+{
+    "name": "Mahjong.Game",
+    "references": [
+        "Mahjong.Core"
+    ]
+}
