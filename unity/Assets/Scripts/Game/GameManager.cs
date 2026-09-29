@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Mahjong.Core;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace Mahjong.Game
 {
@@ -14,8 +15,11 @@ namespace Mahjong.Game
     /// </summary>
     public class GameManager : MonoBehaviour
     {
-        const float QuarterSize = 0.5f; // Welt-Einheiten pro Viertel-Kachel
-        const float TileThickness = 0.6f; // Stapelhoehe einer Ebene
+        // Viertel-Kachel-Groesse pro Achse: Steine sind laenglich (Portrait wie
+        // echte Mahjong-Steine ~30x40 mm) — Flaeche 0,8 x 1,12 Welt-Einheiten.
+        const float QuarterSizeX = 0.4f;
+        const float QuarterSizeZ = 0.56f;
+        const float TileThickness = 0.3f; // Stapelhoehe einer Ebene (Shanghai-Look: ~1/3 der Steinbreite)
 
         const string LayoutPref = "Mahjong.Layout";
         const string SavePref = "Mahjong.Save";
@@ -57,12 +61,21 @@ namespace Mahjong.Game
         float _offsetX;
         float _offsetZ;
 
-        // Kamera-Steuerung (Zoom)
+        // Kamera-Steuerung (Zoom / Winkel / Verschieben)
+        const float MinPitchDeg = 15f;
+        const float MaxPitchDeg = 88f;
+        const float DefaultPitchDeg = 88f;
+
         Camera _camera;
-        Vector3 _cameraTarget;
-        Vector3 _cameraOffset;
+        Vector3 _cameraTarget; // Brettzentrum (unveraenderlich)
+        Vector3 _panTarget;    // aktueller Blickpunkt (verschiebbar)
+        Vector2 _lastPointer;
+        float _boardSpan;
+        float _pitch;          // Erhoehungswinkel (rad)
+        float _azimuth;        // Drehung um Y (rad)
         float _zoom = 1f;
         float _lastPinchDistance;
+        bool _panning;
 
         // Partie-Status
         float _elapsed;
@@ -83,6 +96,48 @@ namespace Mahjong.Game
         public bool Paused { get; set; }
 
         public bool SoundOn => _soundOn;
+
+        // ---------------------------------------------------- Kamera per UI steuern
+
+        /// <summary>Aktueller Blickwinkel in Grad (fuer Slider-Anzeige).</summary>
+        public float PitchDeg => Mathf.Round(_pitch * Mathf.Rad2Deg);
+
+        /// <summary>Aktuelle Brettdrehung in Grad 0-360 (fuer Slider-Anzeige).</summary>
+        public float AzimuthDeg => Mathf.Round(Mathf.Repeat(_azimuth * Mathf.Rad2Deg, 360f));
+
+        /// <summary>Blickwinkel setzen (Slider im Menue).</summary>
+        public void SetPitchDeg(float degrees)
+        {
+            _pitch = Mathf.Clamp(degrees, MinPitchDeg, MaxPitchDeg) * Mathf.Deg2Rad;
+            ApplyCamera();
+        }
+
+        /// <summary>Brett um die Hochachse drehen (Buttons im Menue, 0-360).</summary>
+        public void SetAzimuthDeg(float degrees)
+        {
+            _azimuth = Mathf.Repeat(degrees, 360f) * Mathf.Deg2Rad;
+            ApplyCamera();
+        }
+
+        /// <summary>Blickwinkel in 5-Grad-Schritten (Spielfeld-Buttons).</summary>
+        public void NudgePitch(float delta) => SetPitchDeg(PitchDeg + delta);
+
+        /// <summary>Brettdrehung in 45-Grad-Schritten (Spielfeld-Buttons).</summary>
+        public void NudgeAzimuth(float delta) => SetAzimuthDeg(AzimuthDeg + delta);
+
+        /// <summary>Nur den Blickwinkel auf Standard zuruecksetzen.</summary>
+        public void ResetPitchDeg()
+        {
+            _pitch = DefaultPitchDeg * Mathf.Deg2Rad;
+            ApplyCamera();
+        }
+
+        /// <summary>Nur die Brettdrehung auf Standard zuruecksetzen.</summary>
+        public void ResetAzimuthDeg()
+        {
+            _azimuth = 0f;
+            ApplyCamera();
+        }
 
         public void ToggleSound()
         {
@@ -130,12 +185,12 @@ namespace Mahjong.Game
                 return;
             }
 
-            HandleZoom();
-
             if (Paused)
             {
-                return; // Menue offen: Timer und Klicks eingefroren
+                return; // Menue offen: Kamera-Steuerung, Timer und Klicks eingefroren
             }
+
+            HandleCameraInput();
 
             if (!_won)
             {
@@ -187,7 +242,7 @@ namespace Mahjong.Game
             _board = generated.Board;
 
             var bounds = BoardView.Build(
-                transform, layout, generated, _views, QuarterSize, TileThickness,
+                transform, layout, generated, _views, QuarterSizeX, QuarterSizeZ, TileThickness,
                 out _offsetX, out _offsetZ);
             EnsureSceneRig(bounds);
             RefreshVisuals();
@@ -223,7 +278,7 @@ namespace Mahjong.Game
             _board = board;
 
             var bounds = BoardView.BuildFromBoard(
-                transform, _board, _views, QuarterSize, TileThickness, out _offsetX, out _offsetZ);
+                transform, _board, _views, QuarterSizeX, QuarterSizeZ, TileThickness, out _offsetX, out _offsetZ);
             EnsureSceneRig(bounds);
             RefreshVisuals();
 
@@ -350,9 +405,9 @@ namespace Mahjong.Game
 
             // Beide Steine exakt an der alten Stelle neu aufbauen.
             _views[entry.A] = TileView.Create(
-                transform, entry.A, entry.TypeA, QuarterSize, TileThickness, _offsetX, _offsetZ);
+                transform, entry.A, entry.TypeA, QuarterSizeX, QuarterSizeZ, TileThickness, _offsetX, _offsetZ);
             _views[entry.B] = TileView.Create(
-                transform, entry.B, entry.TypeB, QuarterSize, TileThickness, _offsetX, _offsetZ);
+                transform, entry.B, entry.TypeB, QuarterSizeX, QuarterSizeZ, TileThickness, _offsetX, _offsetZ);
 
             RefreshVisuals();
             SaveGame();
@@ -374,13 +429,39 @@ namespace Mahjong.Game
 
         // ---------------------------------------------------------------- Input
 
+        /// <summary>Zeiger (Maus oder irgendein Finger) liegt auf einem UI-Element?</summary>
+        static bool PointerOverUi()
+        {
+            var es = EventSystem.current;
+
+            if (es == null)
+            {
+                return false;
+            }
+
+            if (Input.touchCount > 0)
+            {
+                for (var i = 0; i < Input.touchCount; i++)
+                {
+                    if (es.IsPointerOverGameObject(Input.GetTouch(i).fingerId))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            return es.IsPointerOverGameObject();
+        }
+
         void HandleClick()
         {
             var cam = Camera.main;
 
-            if (cam == null)
+            if (cam == null || PointerOverUi())
             {
-                return; // z. B. nach Recompile-mitten-im-Play: noch kein Rig
+                return; // z. B. nach Recompile-mitten-im-Play: noch kein Rig / Klick auf UI
             }
 
             Ray ray = default;
@@ -495,14 +576,15 @@ namespace Mahjong.Game
 
         // ---------------------------------------------------------------- Board
 
-        void HandleZoom()
+        /// <summary>Kamera-Input: Zoom (Rad/Pinch), Winkel (Rechtsklick/zwei Finger), Schieben (Drag).</summary>
+        void HandleCameraInput()
         {
-            if (_camera == null)
+            if (_camera == null || PointerOverUi())
             {
                 return;
             }
 
-            // Mausrad (Desktop) oder Pinch (Touch) aendert den Zoomfaktor.
+            // --- Zoom: Mausrad oder Pinch ---
             var scroll = Input.mouseScrollDelta.y;
 
             if (Input.touchCount == 2)
@@ -522,16 +604,127 @@ namespace Mahjong.Game
                 _lastPinchDistance = 0f;
             }
 
-            if (Mathf.Abs(scroll) < 0.001f)
+            if (Mathf.Abs(scroll) > 0.001f)
+            {
+                _zoom = Mathf.Clamp(_zoom * Mathf.Exp(-scroll * 0.2f), 0.45f, 1.8f);
+                ApplyCamera();
+            }
+
+            // --- Winkel: rechte Maustaste ziehen ---
+            // Guarde: echte Maus UND keine Finger (touchCount == 0). Legacy-
+            // Input kann auf Touch-Geraeten ohne Maus mousePresent melden —
+            // die zusätzliche Finger-Bedingung schliesst Pinch als Rotations-
+            // Quelle aus. Ansicht aendert man auf Touch ueber die Buttons.
+            if (Input.mousePresent && Input.touchCount == 0 && Input.GetMouseButton(1))
+            {
+                _azimuth -= Input.GetAxis("Mouse X") * 0.005f;
+                _pitch = Mathf.Clamp(
+                    _pitch + Input.GetAxis("Mouse Y") * 0.005f,
+                    MinPitchDeg * Mathf.Deg2Rad, MaxPitchDeg * Mathf.Deg2Rad);
+                ApplyCamera();
+            }
+
+            // --- Winkel: zwei Finger ziehen (Mittelpunkt-Delta) ---
+            // Entfernt: beim Pinch wandert der Mittelpunkt unweigerlich mit und
+            // verdrehte Winkel/Drehung ungewollt. Ansicht aendert man auf Touch
+            // ueber die Buttons unten links; Pinch zoomt ausschliesslich.
+
+            // --- Schieben: Drag auf leerer Flaeche (Maus links / ein Finger) ---
+            // Klick auf einen Stein geht an HandleClick; hier panen wir nur daneben.
+            // Mauspfad nur mit echter Maus UND ohne Finger auf dem Bildschirm —
+            // vermeidet Doppel-Bedienung durch Touch->Maus-Emulation auf
+            // Touch-Geraeten (mousePresent kann dort fälschlich true melden).
+            if (Input.mousePresent && Input.touchCount == 0)
+            {
+                if (Input.GetMouseButtonDown(0))
+                {
+                    _lastPointer = Input.mousePosition;
+                    _panning = !Physics.Raycast(_camera.ScreenPointToRay(Input.mousePosition), 500f);
+                }
+
+                if (_panning && Input.GetMouseButton(0))
+                {
+                    var position = (Vector2)Input.mousePosition;
+                    PanBy(position - _lastPointer);
+                    _lastPointer = position;
+                }
+
+                if (Input.GetMouseButtonUp(0))
+                {
+                    _panning = false;
+                }
+            }
+
+            if (Input.touchCount == 1)
+            {
+                var touch = Input.GetTouch(0);
+
+                if (touch.phase == TouchPhase.Began)
+                {
+                    _lastPointer = touch.position;
+                    _panning = !(Physics.Raycast(_camera.ScreenPointToRay(touch.position), out var hit, 500f)
+                        && hit.collider.GetComponentInParent<TileView>() != null);
+                }
+                else if (touch.phase == TouchPhase.Moved && _panning)
+                {
+                    var position = touch.position;
+                    PanBy(position - _lastPointer);
+                    _lastPointer = position;
+                }
+                else if (touch.phase == TouchPhase.Ended || touch.phase == TouchPhase.Canceled)
+                {
+                    _panning = false;
+                }
+            }
+            else if (Input.touchCount > 1)
+            {
+                _panning = false; // zweiter Finger: Pinch/Drehen uebernimmt
+            }
+        }
+
+        /// <summary>Schiebt den Blickpunkt parallel zur Brett-Ebene (Board folgt dem Finger).</summary>
+        void PanBy(Vector2 screenDelta)
+        {
+            var t = _camera.transform;
+            var distance = Vector3.Distance(t.position, _panTarget);
+            var perPixel = 2f * distance
+                * Mathf.Tan(_camera.fieldOfView * 0.5f * Mathf.Deg2Rad)
+                / Mathf.Max(Screen.height, 1);
+            var right = t.right;
+            right.y = 0f;
+            right.Normalize();
+            var forward = t.forward;
+            forward.y = 0f;
+            forward.Normalize();
+
+            _panTarget -= right * (screenDelta.x * perPixel)
+                + forward * (screenDelta.y * perPixel);
+
+            // Blickpunkt im Rahmen des Bretts halten (Zentrum ± 80 % Spannweite).
+            _panTarget.x = Mathf.Clamp(_panTarget.x,
+                _cameraTarget.x - _boardSpan * 0.8f, _cameraTarget.x + _boardSpan * 0.8f);
+            _panTarget.z = Mathf.Clamp(_panTarget.z,
+                _cameraTarget.z - _boardSpan * 0.8f, _cameraTarget.z + _boardSpan * 0.8f);
+            ApplyCamera();
+        }
+
+        /// <summary>Positioniert die Kamera aus Spannweite, Winkel, Zoom und Blickpunkt.</summary>
+        void ApplyCamera()
+        {
+            if (_camera == null)
             {
                 return;
             }
 
-            // Entfernungs-Faktor relativ zur Zuhause-Position; Blick bleibt auf dem
-            // Brettzentrum (Zoom bewegt die Kamera entlang der Sichtachse).
-            _zoom = Mathf.Clamp(_zoom * Mathf.Exp(-scroll * 0.2f), 0.45f, 1.6f);
-            _camera.transform.position = _cameraTarget + _cameraOffset * _zoom;
-            _camera.transform.LookAt(_cameraTarget);
+            // 1.30 = Distanzfaktor der alten Ansicht (1.15² + 0.6²)^0.5
+            var distance = _boardSpan * 1.30f * _zoom;
+            var horizontal = new Vector3(Mathf.Sin(_azimuth), 0f, -Mathf.Cos(_azimuth));
+            var offset = horizontal * (Mathf.Cos(_pitch) * distance)
+                + Vector3.up * (Mathf.Sin(_pitch) * distance);
+            var target = _cameraTarget
+                + Vector3.ClampMagnitude(_panTarget - _cameraTarget, _boardSpan * 0.8f);
+            _camera.transform.position = target + offset;
+            _camera.transform.LookAt(target);
         }
 
         void RemoveTile(TileView tile)
@@ -597,19 +790,18 @@ namespace Mahjong.Game
 
             cam.backgroundColor = new Color(0.10f, 0.13f, 0.10f);
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.nearClipPlane = 0.1f;
+            cam.nearClipPlane = 0.3f; // nicht kleiner: groesser = bessere Tiefen-Praezision
             cam.farClipPlane = span * 4f;
-            cam.transform.position = center + new Vector3(0f, span * 1.15f, -span * 0.6f);
-            cam.transform.LookAt(center);
-
-            // Zoom-Referenz: Brettzentrum + Zuhause-Position; HandleZoom bewegt die
-            // Kamera entlang dieser Sichtachse (Standard etwas naeher ans Brett).
+            // Kamera-Fuehrung (Zoom/Winkel/Schieben) via HandleCameraInput/ApplyCamera:
+            // Steile Standardansicht (65 Grad), Board komplett im Bild.
             _camera = cam;
             _cameraTarget = center;
-            _cameraOffset = cam.transform.position - center;
-            _zoom = 0.75f;
-            _camera.transform.position = _cameraTarget + _cameraOffset * _zoom;
-            _camera.transform.LookAt(_cameraTarget);
+            _panTarget = center;
+            _boardSpan = span;
+            _pitch = DefaultPitchDeg * Mathf.Deg2Rad;
+            _azimuth = 0f;
+            _zoom = 1f;
+            ApplyCamera();
 
             // Sound-Ausgabe an diesem Objekt (Kamera hat den AudioListener).
             if (_audio == null)

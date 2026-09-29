@@ -20,12 +20,14 @@ namespace Mahjong.Game
             LayoutData layout,
             GeneratedBoard generated,
             Dictionary<Pos, TileView> views,
-            float quarterSize,
+            float quarterSizeX,
+            float quarterSizeZ,
             float tileThickness,
             out float offsetX,
             out float offsetZ)
         {
-            return BuildFromBoard(parent, generated.Board, views, quarterSize, tileThickness, out offsetX, out offsetZ);
+            return BuildFromBoard(parent, generated.Board, views, quarterSizeX, quarterSizeZ,
+                tileThickness, out offsetX, out offsetZ);
         }
 
         /// <summary>Baut die Steine eines beliebigen Boardzustands (auch Teilboards).</summary>
@@ -33,7 +35,8 @@ namespace Mahjong.Game
             Transform parent,
             BoardState board,
             Dictionary<Pos, TileView> views,
-            float quarterSize,
+            float quarterSizeX,
+            float quarterSizeZ,
             float tileThickness,
             out float offsetX,
             out float offsetZ)
@@ -41,19 +44,20 @@ namespace Mahjong.Game
             var boardGo = new GameObject("Board");
             boardGo.transform.SetParent(parent, false);
 
-            ComputeOffsets(board, quarterSize, out offsetX, out offsetZ);
+            ComputeOffsets(board, quarterSizeX, quarterSizeZ, out offsetX, out offsetZ);
 
             var bounds = new Bounds();
 
             foreach (var kv in board.Tiles)
             {
-                var view = TileView.Create(boardGo.transform, kv.Key, kv.Value, quarterSize, tileThickness, offsetX, offsetZ);
+                var view = TileView.Create(boardGo.transform, kv.Key, kv.Value,
+                    quarterSizeX, quarterSizeZ, tileThickness, offsetX, offsetZ);
                 views.Add(kv.Key, view);
                 bounds.Encapsulate(view.transform.position);
             }
 
             // Bounding-Box um die tatsaechliche Steingroesse erweitern.
-            bounds.Expand(new Vector3(1f, tileThickness, 1f));
+            bounds.Expand(new Vector3(2f * quarterSizeX, tileThickness, 2f * quarterSizeZ));
             return bounds;
         }
 
@@ -63,7 +67,8 @@ namespace Mahjong.Game
         /// </summary>
         public static void ComputeOffsets(
             BoardState board,
-            float quarterSize,
+            float quarterSizeX,
+            float quarterSizeZ,
             out float offsetX,
             out float offsetZ)
         {
@@ -81,8 +86,8 @@ namespace Mahjong.Game
             }
 
             // Weltmittelpunkt des Boards (Steine belegen 2x2 Vierteil-Kacheln).
-            offsetX = (minWidth + maxWidth + 2) * quarterSize * 0.5f;
-            offsetZ = (minHeight + maxHeight + 2) * quarterSize * 0.5f;
+            offsetX = (minWidth + maxWidth + 2) * quarterSizeX * 0.5f;
+            offsetZ = (minHeight + maxHeight + 2) * quarterSizeZ * 0.5f;
         }
     }
 }

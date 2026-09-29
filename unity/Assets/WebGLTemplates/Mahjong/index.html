@@ -12,7 +12,8 @@
       touch-action: none; }
     #unity-loading { position: absolute; inset: 0; display: flex;
       flex-direction: column; align-items: center; justify-content: center;
-      gap: 14px; color: #e8e2ce; font-family: sans-serif; }
+      gap: 14px; color: #e8e2ce; font-family: sans-serif; text-align: center;
+      padding: 0 16px; }
     #unity-loading h1 { margin: 0; font-size: 28px; font-weight: 600;
       letter-spacing: 1px; }
     #unity-progress-bar { width: min(320px, 70vw); height: 10px;
@@ -20,6 +21,8 @@
       background: #0e130e; }
     #unity-progress { width: 0%; height: 100%; background: #7da87d;
       transition: width 0.2s linear; }
+    #unity-status { font-size: 14px; min-height: 40px; white-space: pre-wrap;
+      max-width: min(560px, 86vw); }
     #unity-loading.done { display: none; }
   </style>
 </head>
@@ -29,20 +32,75 @@
     <div id="unity-loading">
       <h1>Mahjong Solitaire</h1>
       <div id="unity-progress-bar"><div id="unity-progress"></div></div>
+      <div id="unity-status"></div>
     </div>
   </div>
-  <script src="Build/{{{ LOADER_FILENAME }}}"></script>
+  <script src="Build/{{{ LOADER_FILENAME }}}?v=13"></script>
   <script>
-    createUnityInstance(document.querySelector("#unity-canvas"), {
-      dataUrl: "Build/{{{ DATA_FILENAME }}}",
-      frameworkUrl: "Build/{{{ FRAMEWORK_FILENAME }}}",
-      codeUrl: "Build/{{{ CODE_FILENAME }}}",
-    }, function (progress) {
-      document.getElementById("unity-progress").style.width =
-        Math.round(progress * 100) + "%";
-    }).then(function () {
-      document.getElementById("unity-loading").classList.add("done");
-    });
+    // Version hier mit jedem Deploy hochzaehlen (alle Build-URLs unten
+    // bekommen sie angehaengt — veraltete Browser-/IndexedDB-Caches sind
+    // damit ausgeschlossen). Der Tab-Titel zeigt sie zum Gegenchecken.
+    var V = 13;
+    document.title = "Mahjong Solitaire v" + V;
+    (function () {
+      var loadingBox = document.getElementById("unity-loading");
+      var progressBar = document.getElementById("unity-progress");
+      var statusText = document.getElementById("unity-status");
+
+      function showError(msg) {
+        progressBar.parentElement.style.display = "none";
+        statusText.style.color = "#e8a0a0";
+        statusText.textContent = msg;
+      }
+
+      // Unity 6 braucht WebGL2 — ohne diese Pruefung haengt der Ladebalken
+      // ewig (vor allem aeltere Android-Tablets mit altem Chrome).
+      if (!document.createElement("canvas").getContext("webgl2")) {
+        showError(
+          "Dieses Gerät unterstützt WebGL2 nicht — das Spiel kann hier nicht laufen.\n\n" +
+          "Lösung: Chrome im Play Store aktualisieren oder einen aktuellen Browser verwenden.");
+        return;
+      }
+
+      window.addEventListener("unhandledrejection", function (e) {
+        var reason = e.reason;
+        showError("Fehler beim Laden: " +
+          (reason && reason.message ? reason.message : String(reason)));
+      });
+
+      var lastProgress = 0;
+      var lastProgressTime = Date.now();
+
+      createUnityInstance(document.querySelector("#unity-canvas"), {
+        dataUrl: "Build/{{{ DATA_FILENAME }}}?v=" + V,
+        frameworkUrl: "Build/{{{ FRAMEWORK_FILENAME }}}?v=" + V,
+        codeUrl: "Build/{{{ CODE_FILENAME }}}?v=" + V,
+      }, function (progress) {
+        var pct = Math.round(progress * 100);
+        progressBar.style.width = pct + "%";
+        statusText.style.color = "";
+        statusText.textContent = pct < 100 ? "Lade… " + pct + "%" : "Starte…";
+        lastProgress = pct;
+        lastProgressTime = Date.now();
+      }).then(function () {
+        loadingBox.classList.add("done");
+      });
+
+      // Stillstand > 90 s: Hinweis anzeigen statt stummem Balken
+      // (JS-Dekompression ist auf schwachen Geräten langsam).
+      setInterval(function () {
+        if (loadingBox.classList.contains("done") ||
+            lastProgress <= 0 || lastProgress >= 100) {
+          return;
+        }
+        if (Date.now() - lastProgressTime > 90000) {
+          statusText.style.color = "#e8c080";
+          statusText.textContent = "Lade… " + lastProgress +
+            "% — dauert ungewöhnlich lange. Bitte weiter warten oder " +
+            "eine schnellere Verbindung/geringere Browserlast versuchen.";
+        }
+      }, 5000);
+    })();
   </script>
 </body>
 </html>

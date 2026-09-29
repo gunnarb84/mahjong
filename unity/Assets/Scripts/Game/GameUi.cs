@@ -50,6 +50,8 @@ namespace Mahjong.Game
         GameObject _menuPanel;
         GameObject _winDialog;
         GameObject _deadlockDialog;
+        Text _pitchValueText;
+        Text _azimuthValueText;
 
         public void Bind(GameManager manager)
         {
@@ -78,6 +80,7 @@ namespace Mahjong.Game
             }
 
             BuildHud(canvasGo.transform);
+            BuildViewControls(canvasGo.transform);
             _menuPanel = BuildMenu(canvasGo.transform);
             _winDialog = BuildWinDialog(canvasGo.transform);
             _deadlockDialog = BuildDeadlockDialog(canvasGo.transform);
@@ -145,37 +148,76 @@ namespace Mahjong.Game
             title.rectTransform.anchorMin = new Vector2(0f, 1f);
             title.rectTransform.anchorMax = new Vector2(1f, 1f);
             title.rectTransform.pivot = new Vector2(0.5f, 1f);
-            title.rectTransform.offsetMin = new Vector2(0f, -120f);
-            title.rectTransform.offsetMax = new Vector2(0f, -40f);
+            title.rectTransform.offsetMin = new Vector2(0f, -116f);
+            title.rectTransform.offsetMax = new Vector2(0f, -36f);
 
-            var column = MakeColumn(panel.transform, new Vector2(0.5f, 0.66f), 340f);
+            // Scrollbarer Bereich unter dem Titel: alles (Aktionen + Layouts)
+            // kommt in EINE Column — das Menue passt damit auf jedes
+            // Hoehenverhaeltnis (Tablet-Portrait!) statt an feste Prozent-Anker
+            // zu kollidieren. ScrollRect macht lange Listen bedienbar.
+            var scrollGo = new GameObject("MenuScroll", typeof(RectTransform), typeof(ScrollRect));
+            var srt = scrollGo.GetComponent<RectTransform>();
+            srt.SetParent(panel.transform, false);
+            srt.anchorMin = new Vector2(0f, 0f);
+            srt.anchorMax = new Vector2(1f, 1f);
+            srt.offsetMin = new Vector2(0f, 20f);
+            srt.offsetMax = new Vector2(0f, -128f);
+            var scrollRect = scrollGo.GetComponent<ScrollRect>();
+            scrollRect.horizontal = false;
+            scrollRect.scrollSensitivity = 24f;
 
-            AddMenuButton(column.transform, "Weiterspielen", () => ToggleMenu());
-            AddMenuButton(column.transform, "Neue Partie", () =>
+            var viewport = new GameObject("Viewport", typeof(RectTransform), typeof(Image), typeof(RectMask2D));
+            var vrt = viewport.GetComponent<RectTransform>();
+            vrt.SetParent(scrollGo.transform, false);
+            vrt.anchorMin = Vector2.zero;
+            vrt.anchorMax = Vector2.one;
+            vrt.offsetMin = Vector2.zero;
+            vrt.offsetMax = Vector2.zero;
+            var viewportImage = viewport.GetComponent<Image>();
+            viewportImage.sprite = WhiteSprite;
+            viewportImage.color = new Color(0f, 0f, 0f, 0f); // unsichtbar, dient als Raycast-Ziehflaeche
+            scrollRect.viewport = vrt;
+
+            var content = new GameObject("Content", typeof(VerticalLayoutGroup), typeof(ContentSizeFitter));
+            var crt = content.GetComponent<RectTransform>();
+            crt.SetParent(vrt, false);
+            crt.anchorMin = new Vector2(0.5f, 1f);
+            crt.anchorMax = new Vector2(0.5f, 1f);
+            crt.pivot = new Vector2(0.5f, 1f);
+            var group = content.GetComponent<VerticalLayoutGroup>();
+            group.padding = new RectOffset(0, 24, 16, 0);
+            group.spacing = 10f;
+            group.childControlWidth = false;
+            group.childControlHeight = false;
+            group.childForceExpandWidth = false;
+            group.childForceExpandHeight = false;
+            group.childAlignment = TextAnchor.UpperCenter;
+            content.GetComponent<ContentSizeFitter>().verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            scrollRect.content = crt;
+
+            AddMenuButton(content.transform, "Weiterspielen", () => ToggleMenu());
+            AddMenuButton(content.transform, "Neue Partie", () =>
             {
                 ToggleMenu();
                 _manager.NewGame();
             });
-            AddMenuButton(column.transform, "Vollbild an/aus", () =>
+            AddMenuButton(content.transform, "Vollbild an/aus", () =>
             {
                 Screen.fullScreen = !Screen.fullScreen;
             });
 
-            var caption = MakeText(panel.transform, "Layout wählen (startet neue Partie)", 20,
+            var caption = MakeText(content.transform, "Layout wählen (startet neue Partie)", 20,
                 TextAnchor.MiddleCenter, new Color(0.8f, 0.8f, 0.8f));
-            var crt = caption.rectTransform;
-            crt.anchorMin = new Vector2(0f, 0.46f);
-            crt.anchorMax = new Vector2(1f, 0.46f);
-            crt.pivot = new Vector2(0.5f, 1f);
-            crt.offsetMin = new Vector2(0f, -32f);
-            crt.offsetMax = new Vector2(0f, 0f);
+            caption.rectTransform.sizeDelta = new Vector2(480f, 44f);
+            var captionElement = caption.gameObject.AddComponent<LayoutElement>();
+            captionElement.preferredHeight = 44f;
 
-            var layouts = MakeColumn(panel.transform, new Vector2(0.5f, 0.42f), 340f);
+            var layouts = content.transform;
 
             foreach (var (resource, label) in Layouts)
             {
                 var res = resource; // Closure-Sicherheit
-                AddMenuButton(layouts.transform, label, () =>
+                AddMenuButton(layouts, label, () =>
                 {
                     ToggleMenu();
                     _manager.NewGame(res, UnityEngine.Random.Range(0, int.MaxValue));
@@ -183,7 +225,7 @@ namespace Mahjong.Game
             }
 
             _soundToggleText = MakeText(
-                AddMenuButton(layouts.transform, "", () =>
+                AddMenuButton(layouts, "", () =>
                 {
                     _manager.ToggleSound();
                     UpdateSoundToggleText();
@@ -297,6 +339,8 @@ namespace Mahjong.Game
                 return;
             }
 
+            SyncViewLabels();
+
             _hudText.text = "Zeit " + GameManager.FormatTime(_manager.Elapsed)
                 + "    Punkte " + _manager.Score
                 + "    Steine " + _manager.TileCount;
@@ -321,6 +365,32 @@ namespace Mahjong.Game
             }
 
             _manager.Paused = _manager.Won || menuOpen;
+        }
+
+        /// <summary>
+        /// Anzeige-Werte an die echte Kamera-Pose anpassen (auch nach Gesten-Orbit
+        /// oder Rechtsklick-Drehung). Vor Partie-Start liefert PitchDeg 0.
+        /// </summary>
+        void SyncViewLabels()
+        {
+            if (_manager == null || _pitchValueText == null || _manager.PitchDeg <= 0f)
+            {
+                return;
+            }
+
+            var pitch = Mathf.RoundToInt(_manager.PitchDeg) + "°";
+
+            if (_pitchValueText.text != pitch)
+            {
+                _pitchValueText.text = pitch;
+            }
+
+            var azimuth = Mathf.RoundToInt(_manager.AzimuthDeg) + "°";
+
+            if (_azimuthValueText.text != azimuth)
+            {
+                _azimuthValueText.text = azimuth;
+            }
         }
 
         void ToggleMenu()
@@ -386,6 +456,100 @@ namespace Mahjong.Game
             image.sprite = WhiteSprite;
             image.color = color;
             return image;
+        }
+
+        // --------------------------------------------------- Ansicht-Regler (Spielfeld)
+
+        /// <summary>
+        /// Kompaktes Bedienfeld unten links, immer sichtbar: Winkel in
+        /// 5-Grad-Schritten, Drehung in 45-Grad-Schritten, jeweils mit eigenem
+        /// Reset — Buttons statt Slider (Slider-Drag kollidierte mit der
+        /// Brett-Steuerung).
+        /// </summary>
+        void BuildViewControls(Transform canvas)
+        {
+            var panel = new GameObject("ViewControls", typeof(Image));
+            var prt = panel.GetComponent<RectTransform>();
+            prt.SetParent(canvas, false);
+            prt.anchorMin = new Vector2(0f, 0f);
+            prt.anchorMax = new Vector2(0f, 0f);
+            prt.pivot = new Vector2(0f, 0f);
+            prt.sizeDelta = new Vector2(300f, 104f);
+            prt.anchoredPosition = new Vector2(12f, 12f);
+
+            var image = panel.GetComponent<Image>();
+            image.sprite = WhiteSprite;
+            image.color = new Color(0f, 0f, 0f, 0.35f);
+
+            MakeViewRow(panel.transform, "Winkel", true,
+                () => _manager.NudgePitch(-5f),
+                () => _manager.NudgePitch(5f),
+                () => _manager.ResetPitchDeg(),
+                out _pitchValueText);
+
+            MakeViewRow(panel.transform, "Drehung", false,
+                () => _manager.NudgeAzimuth(-45f),
+                () => _manager.NudgeAzimuth(45f),
+                () => _manager.ResetAzimuthDeg(),
+                out _azimuthValueText);
+        }
+
+        /// <summary>Zeile im Ansicht-Panel: Label, Minus, Wert, Plus, Reset.</summary>
+        void MakeViewRow(
+            Transform panel,
+            string label,
+            bool topRow,
+            UnityAction minus,
+            UnityAction plus,
+            UnityAction reset,
+            out Text valueText)
+        {
+            var row = new GameObject("Row " + label, typeof(RectTransform));
+            var rr = row.GetComponent<RectTransform>();
+            rr.SetParent(panel, false);
+            rr.anchorMin = new Vector2(0f, 1f);
+            rr.anchorMax = new Vector2(1f, 1f);
+            rr.pivot = new Vector2(0.5f, 1f);
+            rr.offsetMin = new Vector2(12f, topRow ? -50f : -96f);
+            rr.offsetMax = new Vector2(-12f, topRow ? -6f : -52f);
+
+            var caption = MakeText(row.transform, label, 18, TextAnchor.MiddleLeft, Color.white);
+            var crt = caption.rectTransform;
+            crt.anchorMin = new Vector2(0f, 0.5f);
+            crt.anchorMax = new Vector2(0f, 0.5f);
+            crt.pivot = new Vector2(0f, 0.5f);
+            crt.sizeDelta = new Vector2(64f, 26f);
+            crt.anchoredPosition = Vector2.zero;
+
+            valueText = MakeText(row.transform, "0°", 18, TextAnchor.MiddleCenter,
+                new Color(0.85f, 0.9f, 0.85f));
+            var vrt = valueText.rectTransform;
+            vrt.anchorMin = new Vector2(0f, 0.5f);
+            vrt.anchorMax = new Vector2(0f, 0.5f);
+            vrt.pivot = new Vector2(0f, 0.5f);
+            vrt.sizeDelta = new Vector2(46f, 26f);
+            vrt.anchoredPosition = new Vector2(108f, 0f);
+
+            MakeStepButton(row.transform, "-", 40f, minus, 66f);
+            MakeStepButton(row.transform, "+", 40f, plus, 158f);
+
+            var resetBtn = MakeButton(row.transform, "Reset", reset, new Vector2(84f, 38f), 16);
+            var brt = resetBtn.GetComponent<RectTransform>();
+            brt.anchorMin = new Vector2(1f, 0.5f);
+            brt.anchorMax = new Vector2(1f, 0.5f);
+            brt.pivot = new Vector2(1f, 0.5f);
+            brt.anchoredPosition = Vector2.zero;
+        }
+
+        /// <summary>Quadratischer +/- Schrittknopf, links verankert in der Zeile.</summary>
+        static void MakeStepButton(Transform row, string label, float size, UnityAction onClick, float x)
+        {
+            var button = MakeButton(row, label, onClick, new Vector2(size, size), 22);
+            var rt = button.GetComponent<RectTransform>();
+            rt.anchorMin = new Vector2(0f, 0.5f);
+            rt.anchorMax = new Vector2(0f, 0.5f);
+            rt.pivot = new Vector2(0f, 0.5f);
+            rt.anchoredPosition = new Vector2(x, 0f);
         }
 
         static Button MakeButton(Transform parent, string label, UnityAction onClick, Vector2 size, int fontSize)

@@ -87,12 +87,16 @@ namespace Mahjong.Game
                         var c = a + segments + 1;
                         var d = c + 1;
 
+                        // Unity verlangt FRONT-Faces im Uhrzeigersinn aus Kamerasicht
+                        // (Left-Handed): (a,b,c) + (b,d,c). Die fruehere Reihenfolge
+                        // (a,c,b) war gegen den Uhrzeiger -> alle Flaeche wurden
+                        // ge-cullt (Glasoptik: Blick durch die fehlende Vorderseite).
                         tris.Add(a);
-                        tris.Add(c);
-                        tris.Add(b);
                         tris.Add(b);
                         tris.Add(c);
+                        tris.Add(b);
                         tris.Add(d);
+                        tris.Add(c);
                     }
                 }
             }

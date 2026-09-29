@@ -17,9 +17,12 @@ namespace Mahjong.Game
         static Texture2D _atlas;
         static Material _topMaterial;
         static Material _sideMaterial;
+        static Material _outlineMaterial;
         static Mesh _bodyMesh;
         static float _bodyThickness = -1f;
-        const float BodyRadius = 0.05f; // Rundung (Anteil der Einheitskante)
+        const float BodyRadius = 0.032f; // dezente Kantenrundung (0.05 dunkelte die Schultern zu stark ab)
+        const float GapScale = 0.975f; // schmale Fuge zwischen den Steinen
+        const float OutlineWidth = 0.022f; // Cel-Shading-Kontur (Welt-Einheiten)
 
         public Pos Pos { get; private set; }
 
@@ -36,7 +39,8 @@ namespace Mahjong.Game
             Transform parent,
             Pos pos,
             TileType type,
-            float quarterSize,
+            float quarterSizeX,
+            float quarterSizeZ,
             float tileThickness,
             float offsetX,
             float offsetZ)
@@ -48,10 +52,13 @@ namespace Mahjong.Game
             go.transform.SetParent(parent, false);
 
             // Zentriert: Stein belegt [X, X+2) x [Y, Y+2) Vierteil-Kacheln.
-            var x = (pos.X + 1) * quarterSize - offsetX;
-            var z = (pos.Y + 1) * quarterSize - offsetZ;
+            var x = (pos.X + 1) * quarterSizeX - offsetX;
+            var z = (pos.Y + 1) * quarterSizeZ - offsetZ;
             go.transform.localPosition = new Vector3(x, pos.Layer * tileThickness + tileThickness * 0.5f, z);
-            go.transform.localScale = new Vector3(0.94f, tileThickness, 0.94f);
+            // Laenglicher Fußabdruck (Portrait) mit schmaler Fuge.
+            var faceX = 2f * quarterSizeX * GapScale;
+            var faceZ = 2f * quarterSizeZ * GapScale;
+            go.transform.localScale = new Vector3(faceX, tileThickness, faceZ);
 
             go.GetComponent<MeshFilter>().sharedMesh = _bodyMesh;
             var collider = go.GetComponent<BoxCollider>();
@@ -60,14 +67,40 @@ namespace Mahjong.Game
             var sideRenderer = go.GetComponent<MeshRenderer>();
             sideRenderer.sharedMaterial = _sideMaterial;
 
-            // Symbol-Flaeche auf der Oberseite.
+            // Cel-Shading-Kontur: gleiche Huelle, minimal vergroessert (nur in
+            // X/Z — nicht in Y, sonst liegt eine dunkle Flaeche ueber dem Symbol),
+            // mit Cull-Front-Shader gezeichnet = dunkle Silhouette um jeden Stein.
+            if (_outlineMaterial != null)
+            {
+                var outlineGo = new GameObject("Outline", typeof(MeshFilter), typeof(MeshRenderer));
+                outlineGo.transform.SetParent(go.transform, false);
+                outlineGo.transform.localPosition = Vector3.zero;
+                outlineGo.transform.localScale = new Vector3(
+                    (faceX + 2f * OutlineWidth) / faceX, 1f, (faceZ + 2f * OutlineWidth) / faceZ);
+                outlineGo.GetComponent<MeshFilter>().sharedMesh = _bodyMesh;
+                var outlineRenderer = outlineGo.GetComponent<MeshRenderer>();
+                outlineRenderer.sharedMaterial = _outlineMaterial;
+                outlineRenderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                outlineRenderer.receiveShadows = false;
+            }
+
+            // Symbol-Flaeche auf der Oberseite. Z-Scale kompensiert den
+            // laenglichen Fußabdruck, damit die (quadratischen) Glyphen des
+            // Atlas nicht gestreckt wirken.
             var topGo = GameObject.CreatePrimitive(PrimitiveType.Quad);
             Object.Destroy(topGo.GetComponent<Collider>());
             topGo.name = "Face";
             topGo.transform.SetParent(go.transform, false);
             topGo.transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
-            topGo.transform.localPosition = new Vector3(0f, 0.505f, 0f);
-            topGo.transform.localScale = new Vector3(0.84f, 1f, 0.84f); // innerhalb der gerundeten Flaeche
+            // 0.53 statt 0.505: groesserer Abstand zur Koerper-Oberflaeche —
+            // auf 16-Bit-Depth (viele Mobil-Browser) z-fightet sonst das Symbol
+            // durch benachbarte Geometrie.
+            topGo.transform.localPosition = new Vector3(0f, 0.53f, 0f);
+            // Aspekt-Kompensation in Quad-Y: nach der 90°-X-Drehung laeuft die
+            // Quad-Y-Achse entlang der Stein-Tiefe (Z) — dort wirkt die
+            // verlaengerte Skala des Koerpers und streckt sonst die Glyphen.
+            topGo.transform.localScale = new Vector3(
+                0.84f, 0.84f * quarterSizeX / quarterSizeZ, 1f);
 
             var topRenderer = topGo.GetComponent<MeshRenderer>();
             topRenderer.sharedMaterial = _topMaterial;
@@ -110,11 +143,78 @@ namespace Mahjong.Game
             _sideMaterial = new Material(Shader.Find("Standard"));
             _sideMaterial.color = TileBase;
 
-            _topMaterial = new Material(Shader.Find("Standard"));
+            // Symbol-Material (Mahjong/Face: Alpha-Blend hartcodiert im Shader —
+            // Standard-Fade-Variante wuerde das Variant-Stripping im Build
+            // entfernen). Shader.Find funktioniert im Build, weil FaceMat.mat
+            // (vom Build-Menue erzeugt) den Shader referenziert und ihn so in
+            // den Build bringt. Handgeschriebene YAML-Nachbauten vermeiden wir:
+            // Resources.Load wirft in Unity 6 hart bei Formatabweichungen.
+            var faceShader = Shader.Find("Mahjong/Face");
 
-            if (_atlas != null)
+            if (faceShader != null)
+            {
+                _topMaterial = new Material(faceShader);
+            }
+            else
+            {
+                _topMaterial = null; // Material-Asset nur in Not zurueckgreifen lassen
+
+                try
+                {
+                    _topMaterial = Resources.Load<Material>("Art/FaceMat");
+                }
+                catch
+                {
+                    // bewusst leer: Material fehlt -> unten sauber loggen
+                }
+
+                if (_topMaterial == null)
+                {
+                    Debug.LogError(
+                        "[Mahjong] Weder Shader 'Mahjong/Face' noch FaceMat.mat gefunden — " +
+                        "Symbole fehlen. Fuer einen Build bitte einmal 'Mahjong/WebGL bauen' ausfuehren.");
+                }
+            }
+
+            if (_topMaterial != null && _atlas != null)
             {
                 _topMaterial.mainTexture = _atlas;
+            }
+
+            // Cel-Shading-artiger Look: keinerlei Glanzlichter, flache
+            // Schattierung — die Konturen kommen vom Outline-Mesh.
+            _sideMaterial.SetFloat("_Glossiness", 0f);
+            _sideMaterial.SetFloat("_SpecularHighlights", 0f);
+            _sideMaterial.EnableKeyword("_SPECULARHIGHLIGHTS_OFF");
+
+            // Outline-Material: Shader.Find zuerst (im Build funktioniert das,
+            // weil OutlineMat.mat den Shader referenziert und ihn einbringt);
+            // Resources.Load nur als Rueckfallebene, umhüllt gegen harte Throws.
+            _outlineMaterial = null;
+            var outlineShader = Shader.Find("Mahjong/Outline");
+
+            if (outlineShader != null)
+            {
+                _outlineMaterial = new Material(outlineShader);
+            }
+
+            if (_outlineMaterial == null)
+            {
+                try
+                {
+                    _outlineMaterial = Resources.Load<Material>("Art/OutlineMat");
+                }
+                catch
+                {
+                    // bewusst leer: unten sauber loggen
+                }
+
+                if (_outlineMaterial == null)
+                {
+                    Debug.LogError(
+                        "[Mahjong] Weder Outline-Shader noch OutlineMat.mat gefunden — " +
+                        "Konturen fehlen. Fuer einen Build bitte einmal 'Mahjong/WebGL bauen' ausfuehren.");
+                }
             }
 
             // Einheits-Quader mit abgerundeten Kanten; Hoehe via localScale.

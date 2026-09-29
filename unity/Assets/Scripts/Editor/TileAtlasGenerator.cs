@@ -8,7 +8,8 @@ namespace Mahjong.Game.Editor
     /// <summary>
     /// Erzeugt den Stein-Atlas (alle 42 Gesichter als ein PNG) einmalig im Editor:
     /// Menue "Mahjong/Stein-Atlas generieren". Rendert die Symbole per TextMesh in
-    /// eine Render-Textur und legt sie in Bein-Farbe + Rand in die Atlaszellen.
+    /// eine Render-Textur und legt sie in Stein-Farbe in die Atlaszellen
+    /// (randlos — Rahmen wirkten wie aufgeklebte Sticker).
     /// Das Spiel laedt danach nur noch das PNG — keine Font-Abhaengigkeit mehr
     /// (wichtig fuer WebGL).
     /// </summary>
@@ -18,7 +19,6 @@ namespace Mahjong.Game.Editor
         const string OutputPath = "Assets/Resources/Art/TileAtlas.png";
 
         static readonly Color TileBase = new Color(0.93f, 0.89f, 0.78f);
-        static readonly Color BorderColor = new Color(0.62f, 0.56f, 0.42f);
 
         [MenuItem("Mahjong/Stein-Atlas generieren")]
         public static void Generate()
@@ -29,8 +29,11 @@ namespace Mahjong.Game.Editor
 
             // Unbenutzte Zellen einfaerbigen (8x8-Raster, 42 belegt) — neue Texturen
             // sind sonst undefiniert, und WebGL-Compression verlangt definierten Inhalt.
+            // Alpha 0: der Symbol-Quad zeichnet nur die Glyphe (Alpha-Blend),
+            // der Steinkoerper scheint durch — kein sichtbares Quad-Viereck.
             var fill = new Color32[TileFaces.Columns * CellSize * TileFaces.Rows * CellSize];
             var baseColor = (Color32)TileBase;
+            baseColor.a = 0;
 
             for (var i = 0; i < fill.Length; i++)
             {
@@ -50,7 +53,7 @@ namespace Mahjong.Game.Editor
             cam.orthographic = true;
             cam.aspect = 1f;
             cam.clearFlags = CameraClearFlags.SolidColor;
-            cam.backgroundColor = TileBase; // Zell-Hintergrund = Stein-Farbe
+            cam.backgroundColor = new Color(TileBase.r, TileBase.g, TileBase.b, 0f); // Alpha 0 = transparent
             cam.targetTexture = rt;
             camGo.transform.position = new Vector3(0f, 0f, -10f);
             camGo.transform.rotation = Quaternion.identity;
@@ -80,7 +83,7 @@ namespace Mahjong.Game.Editor
 
                 label.text = TileSymbol.TextFor(type);
                 label.color = TileSymbol.ColorFor(type);
-                cam.orthographicSize = label.text.Contains("\n") ? 1.15f : 0.62f;
+                cam.orthographicSize = OrthoSizeFor(label.text);
                 textGo.transform.position = new Vector3(0f, 0f, -8f); // vor der Kamera (Kamera bei z=-10)
 
                 cam.Render();
@@ -91,8 +94,6 @@ namespace Mahjong.Game.Editor
                 RenderTexture.active = previous;
             }
 
-            atlas.Apply();
-            DrawCellBorders(atlas);
             atlas.Apply();
 
             Object.DestroyImmediate(camGo);
@@ -141,6 +142,35 @@ namespace Mahjong.Game.Editor
             Debug.Log("[Mahjong] Stein-Atlas erzeugt: " + OutputPath + " (42 Gesichter)");
         }
 
+        /// <summary>
+        /// Ortho-Groesse passend zum Symbolinhalt: Einzel-CJK-Zeichen gross,
+        /// Punkt-/Bambus-Reihen nach Spaltenzahl x Zeichenzahl. Konstanten so
+        /// kalibriert, dass ein "●" ~0.44 Welt-Einheiten und eine Symbolzeile
+        /// ~0.62 hoch ist (passend zu characterSize 0.025 @ fontSize 384).
+        /// </summary>
+        static float OrthoSizeFor(string text)
+        {
+            var lines = text.Split('\n');
+
+            if (lines.Length == 1 && lines[0].Length == 1)
+            {
+                return 0.62f; // einzelnes CJK-Zeichen
+            }
+
+            var maxCols = 0;
+
+            foreach (var line in lines)
+            {
+                maxCols = Mathf.Max(maxCols, line.Length);
+            }
+
+            var halfWidth = maxCols * 0.44f * 0.5f;
+            var halfHeight = lines.Length * 0.62f * 0.5f;
+            // 1.45: Symbol bekommt ~30 % Rand zur Steinflaeche (klassischer Look) —
+            // 1.08 fuellte die Flaeche randlos aus (sah schlecht aus).
+            return Mathf.Max(halfWidth, halfHeight) * 1.45f;
+        }
+
         static System.Collections.Generic.List<TileType> AllTypes()
         {
             var types = new System.Collections.Generic.List<TileType>();
@@ -165,34 +195,6 @@ namespace Mahjong.Game.Editor
             }
 
             return types;
-        }
-
-        /// <summary>
-        /// Zeichnet um jede Zelle einen dezenten Rand — bewusst INNEN versetzt:
-        /// der aeusserste Rand jeder Zelle bleibt einfarbig Stein-Hintergrund, damit
-        /// Mipmaps ueber Zellgrenzen hinweg nichts sichtbares verschmieren.
-        /// </summary>
-        static void DrawCellBorders(Texture2D atlas)
-        {
-            const int Inset = 16;   // Abstand Rand <-> Zellkante (Mip-Spielraum)
-            const int Width = 4;    // Randstaerke
-
-            for (var index = 0; index < TileFaces.Columns * TileFaces.Rows; index++)
-            {
-                var px = (index % TileFaces.Columns) * CellSize;
-                var py = (index / TileFaces.Columns) * CellSize;
-
-                for (var i = 0; i < CellSize; i++)
-                {
-                    for (var t = 0; t < Width; t++)
-                    {
-                        atlas.SetPixel(px + i, py + Inset + t, BorderColor);
-                        atlas.SetPixel(px + i, py + CellSize - 1 - Inset - t, BorderColor);
-                        atlas.SetPixel(px + Inset + t, py + i, BorderColor);
-                        atlas.SetPixel(px + CellSize - 1 - Inset - t, py + i, BorderColor);
-                    }
-                }
-            }
         }
     }
 }

@@ -37,9 +37,18 @@ namespace Mahjong.Game.Editor
             PlayerSettings.WebGL.linkerTarget = WebGLLinkerTarget.Wasm;
             PlayerSettings.WebGL.template = "PROJECT:Mahjong";
 
+            // Android-Chrome kann den WASM-Heap nicht ueber ~256 MB hinaus WACHSEN
+            // lassen (bekanntes Chromium-Problem: "memory access out of bounds"
+            // beim Heap-Growth) — der Heap darf nur VORAB gross angelegt werden.
+            // Deshalb: Initial-Heap ueber der Kante anlegen, Growth-Cap fuer Desktop.
+            PlayerSettings.WebGL.initialMemorySize = 320;
+            PlayerSettings.WebGL.maximumMemorySize = 768;
+
             // WebGL: immer IL2CPP/WASM (Debug-Code strippt der Pipeline-Standard).
 
             EnsureShaderIncluded("Standard"); // TileView erzeugt Materialien per Shader.Find
+            EnsureResourcesMaterial("Mahjong/Outline", "Assets/Resources/Art/OutlineMat.mat");
+            EnsureResourcesMaterial("Mahjong/Face", "Assets/Resources/Art/FaceMat.mat");
             EnsureEmptyScene();
 
             var result = BuildPipeline.BuildPlayer(
@@ -94,6 +103,42 @@ namespace Mahjong.Game.Editor
             serialized.ApplyModifiedProperties();
             AssetDatabase.SaveAssets();
             Debug.Log("[Mahjong] Shader 'Always Included' aufgenommen: " + shaderName);
+        }
+
+        /// <summary>
+        /// Der Outline-Shader wird zur Laufzeit via Resources.Load bezogen (statt
+        /// Shader.Find): Ein Material-Asset im Resources-Ordner referenziert den
+        /// Shader, wodurch er garantiert in jedem Build enthalten ist. Der Weg
+        /// ueber "Always Included Shaders" (GraphicsSettings per SerializedObject)
+        /// war unzuverlaessig — die Aenderung persistierte nicht, Shader.Find
+        /// lieferte im Build null und new Material(null) crashte WASM hart
+        /// ("memory access out of bounds", schwarzes Brett).
+        /// </summary>
+        static void EnsureResourcesMaterial(string shaderName, string path)
+        {
+            if (AssetDatabase.LoadAssetAtPath<Material>(path) != null)
+            {
+                return; // schon vorhanden
+            }
+
+            var shader = Shader.Find(shaderName);
+
+            if (shader == null)
+            {
+                Debug.LogError("[Mahjong] Shader nicht gefunden: " + shaderName);
+                return;
+            }
+
+            var directory = Path.GetDirectoryName(path);
+
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            AssetDatabase.CreateAsset(new Material(shader), path);
+            AssetDatabase.SaveAssets();
+            Debug.Log("[Mahjong] Material erzeugt: " + path);
         }
 
         /// <summary>Das Spiel baut alles zur Laufzeit — es braucht nur eine leere Szene.</summary>
