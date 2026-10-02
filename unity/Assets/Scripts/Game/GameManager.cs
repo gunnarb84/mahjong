@@ -56,10 +56,14 @@ namespace Mahjong.Game
         BoardState _board;
         TileView _selected;
         AudioSource _audio;
+        MusicPlayer _music;
         bool _soundOn;
         string _layoutResource;
         float _offsetX;
         float _offsetZ;
+
+        // Highscore-Rueckmeldung der aktuellen Partie (gewonnen -> Platz im Top-10)
+        int _highscorePlacement;
 
         // Kamera-Steuerung (Zoom / Winkel / Verschieben)
         const float MinPitchDeg = 15f;
@@ -147,6 +151,37 @@ namespace Mahjong.Game
             Debug.Log("[Mahjong] Ton " + (_soundOn ? "an" : "aus"));
         }
 
+        /// <summary>Musik-Umschalter im Menue; laeuft pausiert fort statt neu zu starten.</summary>
+        public void ToggleMusic()
+        {
+            if (_music == null)
+            {
+                _music = MusicPlayer.Ensure();
+            }
+            _music.Toggle();
+        }
+
+        public bool MusicOn => _music != null && _music.On;
+
+        /// <summary>Platz des gewonnenen Laufs in der lokalen Top-10 (0 = keiner).</summary>
+        public int HighscorePlacement => _highscorePlacement;
+
+        /// <summary>Anzeige-Label des aktuellen Layouts (aus GameUi.Layouts).</summary>
+        public string LayoutLabel
+        {
+            get
+            {
+                foreach (var (resource, label) in GameUi.Layouts)
+                {
+                    if (resource == _layoutResource)
+                    {
+                        return label;
+                    }
+                }
+                return _layoutResource ?? "";
+            }
+        }
+
         public string LayoutResource => _layoutResource;
 
         public bool HasSave => PlayerPrefs.HasKey(SavePref);
@@ -157,6 +192,10 @@ namespace Mahjong.Game
 
             _soundOn = PlayerPrefs.GetInt(SoundPref, 1) == 1;
             _layoutResource = PlayerPrefs.GetString(LayoutPref, "Layouts/turtle.layout");
+
+            // Musik-Playlist laedt erst auf den ersten Click (WebGL-Autoplay-Sperre),
+            // aber der Zustand (An/Aus aus PlayerPrefs) ist schon vorher abfragbar.
+            _music = MusicPlayer.Ensure();
 
             if (HasSave)
             {
@@ -236,6 +275,7 @@ namespace Mahjong.Game
             _penalties = 0;
             _won = false;
             _deadlocked = false;
+            _highscorePlacement = 0;
             Paused = false;
 
             var generated = BoardGenerator.Generate(layout.Positions, seed);
@@ -750,6 +790,7 @@ namespace Mahjong.Game
                 DeleteSave();
                 Debug.Log("[Mahjong] Gewonnen! Punkte " + Score
                     + ", Zeit " + FormatTime(_elapsed));
+                RecordHighscore();
                 return;
             }
 
@@ -759,6 +800,21 @@ namespace Mahjong.Game
             {
                 PlaySound(TileAudio.Deadlock());
                 Debug.Log("[Mahjong] Kein Zug mehr moeglich — Mischen (-" + ShufflePenalty + ") oder neue Partie.");
+            }
+        }
+
+        /// <summary>Gewonnene Partie in die lokale Top-10 einspielen (nur Gewinne).</summary>
+        void RecordHighscore()
+        {
+            _highscorePlacement = HighscoreStore.Add(new HighscoreEntry(
+                Score,
+                Mathf.FloorToInt(_elapsed),
+                LayoutLabel,
+                System.DateTime.Now.ToString("yyyy-MM-dd")));
+
+            if (_highscorePlacement > 0)
+            {
+                Debug.Log("[Mahjong] Highscore: Platz " + _highscorePlacement);
             }
         }
 

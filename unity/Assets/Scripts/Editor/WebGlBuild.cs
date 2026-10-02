@@ -49,6 +49,7 @@ namespace Mahjong.Game.Editor
             EnsureShaderIncluded("Standard"); // TileView erzeugt Materialien per Shader.Find
             EnsureResourcesMaterial("Mahjong/Outline", "Assets/Resources/Art/OutlineMat.mat");
             EnsureResourcesMaterial("Mahjong/Face", "Assets/Resources/Art/FaceMat.mat");
+            EnsureMusicImportSettings();
             EnsureEmptyScene();
 
             var result = BuildPipeline.BuildPlayer(
@@ -157,6 +158,50 @@ namespace Mahjong.Game.Editor
             {
                 new EditorBuildSettingsScene(EmptyScenePath, true),
             };
+        }
+
+        /// <summary>
+        /// Musik-Import-Einstellungen fuer WebGL: WebGL kann kein Streaming-Audio
+        /// (LoadType Streaming faellt dort auf Decompress zurueck), und Vorbis in
+        /// gemaeessigter Qualitaet haelt die Build-Groesse klein — Ambient/loops
+        /// hoert man da keinen Unterschied. Wird bei JEDEM Build erzwungen, damit
+        /// neu hinzugekommene Tracks nicht mit Fallback-Einstellungen landen.
+        /// </summary>
+        static void EnsureMusicImportSettings()
+        {
+            const string musicDir = "Assets/Resources/Music";
+
+            if (!Directory.Exists(musicDir))
+            {
+                return;
+            }
+
+            foreach (var file in Directory.GetFiles(musicDir, "*.mp3"))
+            {
+                ApplyClipSettings(file);
+            }
+
+            foreach (var file in Directory.GetFiles(musicDir, "*.ogg"))
+            {
+                ApplyClipSettings(file);
+            }
+        }
+
+        static void ApplyClipSettings(string path)
+        {
+            var importer = AssetImporter.GetAtPath(path) as AudioImporter;
+            if (importer == null)
+            {
+                Debug.LogWarning("[Mahjong] Kein Audio-Importer: " + path);
+                return;
+            }
+
+            var settings = importer.defaultSampleSettings;
+            settings.compressionFormat = AudioCompressionFormat.Vorbis;
+            settings.quality = 55f;
+            settings.loadType = AudioClipLoadType.CompressedInMemory;
+            importer.defaultSampleSettings = settings;
+            importer.SaveAndReimport();
         }
     }
 }

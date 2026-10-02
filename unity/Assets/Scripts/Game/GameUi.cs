@@ -47,6 +47,9 @@ namespace Mahjong.Game
         Text _hudText;
         Text _winScoreText;
         Text _soundToggleText;
+        Text _musicToggleText;
+        Text _scoreListText;
+        GameObject _scorePanel;
         GameObject _menuPanel;
         GameObject _winDialog;
         GameObject _deadlockDialog;
@@ -82,6 +85,7 @@ namespace Mahjong.Game
             BuildHud(canvasGo.transform);
             BuildViewControls(canvasGo.transform);
             _menuPanel = BuildMenu(canvasGo.transform);
+            _scorePanel = BuildScorePanel(canvasGo.transform);
             _winDialog = BuildWinDialog(canvasGo.transform);
             _deadlockDialog = BuildDeadlockDialog(canvasGo.transform);
         }
@@ -233,7 +237,78 @@ namespace Mahjong.Game
                 "", 24, TextAnchor.MiddleCenter, Color.white);
             UpdateSoundToggleText();
 
+            _musicToggleText = MakeText(
+                AddMenuButton(layouts, "", () =>
+                {
+                    _manager.ToggleMusic();
+                    UpdateMusicToggleText();
+                }).transform,
+                "", 24, TextAnchor.MiddleCenter, Color.white);
+            UpdateMusicToggleText();
+
+            AddMenuButton(content.transform, "Highscores", () =>
+            {
+                RefreshScorePanel();
+                _scorePanel.SetActive(true);
+            });
+
             return panel.gameObject;
+        }
+
+        // ------------------------------------------------------------- Highscores
+
+        GameObject BuildScorePanel(Transform canvas)
+        {
+            var window = MakeWindow(canvas, "ScorePanel", new Vector2(640f, 480f),
+                new Color(0.05f, 0.10f, 0.06f, 0.97f));
+            window.SetActive(false);
+
+            var title = MakeText(window.transform, "Highscores — gewonnene Partien",
+                32, TextAnchor.MiddleCenter, new Color(0.95f, 0.92f, 0.78f));
+            CenteredText(title, 190f);
+
+            _scoreListText = MakeText(window.transform, "", 22, TextAnchor.UpperCenter, Color.white);
+            var lrt = _scoreListText.rectTransform;
+            lrt.anchorMin = new Vector2(0f, 0f);
+            lrt.anchorMax = new Vector2(1f, 1f);
+            lrt.offsetMin = new Vector2(28f, 90f);
+            lrt.offsetMax = new Vector2(-28f, -60f);
+
+            var back = MakeButton(window.transform, "Zurück", () => window.SetActive(false),
+                new Vector2(200f, 48f), 22);
+            var brt = back.GetComponent<RectTransform>();
+            brt.anchorMin = new Vector2(0.5f, 0f);
+            brt.anchorMax = new Vector2(0.5f, 0f);
+            brt.pivot = new Vector2(0.5f, 0f);
+            brt.anchoredPosition = new Vector2(0f, 24f);
+
+            return window;
+        }
+
+        /// <summary>Zeile des Highscore-Panels: Platz, Punkte, Zeit, Layout, Datum.</summary>
+        void RefreshScorePanel()
+        {
+            if (_scoreListText == null)
+            {
+                return;
+            }
+
+            var list = HighscoreStore.Load();
+            if (list.Entries.Count == 0)
+            {
+                _scoreListText.text = "Noch keine gewonnene Partie.\n\nGewinne, indem du alle Paare\nabbaust — Top 10 landen hier.";
+                return;
+            }
+
+            var lines = new string[list.Entries.Count];
+            for (var i = 0; i < list.Entries.Count; i++)
+            {
+                var e = list.Entries[i];
+                lines[i] = (i + 1) + ".  " + e.Score + "  ·  " + GameManager.FormatTime(e.Seconds)
+                    + "  ·  " + e.Layout + "  ·  " + e.Date;
+            }
+
+            _scoreListText.text = string.Join("\n", lines);
         }
 
         GameObject MakeColumn(Transform parent, Vector2 anchorY, float width, float shiftY = 0f)
@@ -273,7 +348,7 @@ namespace Mahjong.Game
 
         GameObject BuildWinDialog(Transform canvas)
         {
-            var window = MakeWindow(canvas, "WinDialog", new Vector2(560f, 260f), new Color(0.05f, 0.10f, 0.06f, 0.96f));
+            var window = MakeWindow(canvas, "WinDialog", new Vector2(560f, 300f), new Color(0.05f, 0.10f, 0.06f, 0.96f));
 
             var title = MakeText(window.transform, "GEWONNEN!", 44, TextAnchor.MiddleCenter, new Color(0.55f, 0.95f, 0.60f));
             CenteredText(title, 78f);
@@ -355,7 +430,10 @@ namespace Mahjong.Game
                 if (showWin && _winScoreText != null)
                 {
                     _winScoreText.text = "Punkte " + _manager.Score
-                        + "   ·   Zeit " + GameManager.FormatTime(_manager.Elapsed);
+                        + "   ·   Zeit " + GameManager.FormatTime(_manager.Elapsed)
+                        + (_manager.HighscorePlacement > 0
+                            ? "\nHighscore: Platz " + _manager.HighscorePlacement
+                            : "");
                 }
             }
 
@@ -398,10 +476,15 @@ namespace Mahjong.Game
             if (_menuPanel != null)
             {
                 _menuPanel.SetActive(!_menuPanel.activeSelf);
+                if (!_menuPanel.activeSelf && _scorePanel != null)
+                {
+                    _scorePanel.SetActive(false); // Menue zu -> Highscore-Panel mit zu
+                }
 
                 if (_menuPanel.activeSelf)
                 {
                     UpdateSoundToggleText();
+                    UpdateMusicToggleText();
                 }
             }
         }
@@ -411,6 +494,14 @@ namespace Mahjong.Game
             if (_soundToggleText != null)
             {
                 _soundToggleText.text = "Ton: " + (_manager != null && _manager.SoundOn ? "An" : "Aus");
+            }
+        }
+
+        void UpdateMusicToggleText()
+        {
+            if (_musicToggleText != null)
+            {
+                _musicToggleText.text = "Musik: " + (_manager != null && _manager.MusicOn ? "An" : "Aus");
             }
         }
 

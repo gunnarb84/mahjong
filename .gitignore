@@ -31,3 +31,5 @@ build/
 # Lokale Debug-Screenshots
 shot-*.png
 *.unityweb
+# Musik-Kandidaten (Quell-Duplikate zum Anhören, Lizenz siehe Commit)
+assets/music-candidates/
